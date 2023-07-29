@@ -29,7 +29,10 @@ session = boto3.Session(profile_name='default')
             
 def get_db_connection():
     # conn = psycopg2.connect(host=ENDPOINT, port=PORT, database=DBNAME, user=USER, password=PASSWORD, sslrootcert="SSLCERTIFICATE")
-    conn = sa.create_engine(f'postgresql+psycopg2://{USER}:{PASSWORD}@{ENDPOINT}:{PORT}/{DBNAME}')
+    try:
+        conn = sa.create_engine(f'postgresql+psycopg2://{USER}:{PASSWORD}@{ENDPOINT}:{PORT}/{DBNAME}')
+    except Exception as e:
+        print("Database connection failed due to {}".format(e))
     return conn
 
 

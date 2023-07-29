@@ -37,6 +37,7 @@ def convert_to_dict(x):
         out = x
     return out
 
+
 def convert_to_list(x):
     if pd.notna(x).all() and isinstance(x, str):
         string = x.replace('\'','\"')
@@ -51,6 +52,42 @@ def convert_to_list(x):
 
 def create_dataframe(data: list):
     return pd.DataFrame.from_dict(data)
+
+
+def write_data_to_db(engine, df: pd.DataFrame, table_name: str):
+    conn = None
+    try:
+        with engine.connect() as conn:
+            # query = 'INSERT into switch values (?, ?, ?, ?)'
+            df.to_sql(table_name, conn, if_exists='append', index=False, schema='formula1')
+
+    except Exception as e:
+        print(f"Database write failed due to {e}")
+        print(f"Unable to write to {table_name.upper()} table")
+
+    finally: 
+        if conn is not None:
+            conn.close()
+
+
+def update_etl_table(is_dim: bool, is_fact: bool, is_init: bool):
+    df = pd.DataFrame()
+    current_date = datetime.date.today()
+    current_time = datetime.datetime.now().strftime('%H:%M:%S')
+    int_timestamp = int(datetime.datetime.now().timestamp())
+
+    columns = ['id','is_dimension_table', 'is_fact_table', 'is_initial_data_load', 'etl_load_date', 'etl_load_time']
+    entry = [int_timestamp, is_dim, is_fact, is_init, current_date, current_time]
+
+    # print(dict(zip(columns, entry)))
+    df = pd.DataFrame(dict(zip(columns, entry)), index=[0])
+
+    if db_engine:
+        write_data_to_db(engine=db_engine, df=df, table_name='data_load')
+    else: 
+        print("unable to update data_load table")
+    # print(df.head())
+
 
 # get data (api call) functions
 # get all drivers 
@@ -145,6 +182,7 @@ def get_all_circuits():
 
     return api_circuits_count, actual_circuits_count, f1_circuits
 
+
 # refactor to handle if dimension has more than 1000 observations
 def get_dimension(dimension):
     endpoint = f"{base_url}/{dimension.lower()}s.json"
@@ -174,6 +212,7 @@ def get_dimension(dimension):
 
     return api_dim_count, actual_dim_count, f1_dim
 
+
 def get_race_schedule_per_season(season: int):
     endpoint = f"{base_url}/{str(season)}.json"
     # print(endpoint)
@@ -196,6 +235,7 @@ def get_race_schedule_per_season(season: int):
 
     return f1_races
 
+
 def get_race_result(season: int, round: int):
     endpoint = f"{base_url}/{str(season)}/{str(round)}/results.json"
     print(endpoint)
@@ -217,7 +257,7 @@ def get_race_result(season: int, round: int):
         print(e)
 
     return f1_races_results
-    # pass
+
 
 def get_qualifying_result(season: int, round: int):
     endpoint = f"{base_url}/{str(season)}/{str(round)}/qualifying.json"
@@ -277,12 +317,13 @@ def clean_circuit_table(df: pd.DataFrame):
     return df
 
 def clean_driver_table(df: pd.DataFrame):
-    df['dateOfBirth'] = pd.to_datetime(df['dateOfBirth'], infer_datetime_format=True)
+    # df['dateOfBirth'] = pd.to_datetime(df['dateOfBirth'], infer_datetime_format=True)
+    df['dateOfBirth'] = pd.to_datetime(df['dateOfBirth'], format="%Y-%m-%d")
     return df
 
 
 # cleanup functions
-def clean_season_table(df):
+def clean_season_table(df: pd.DataFrame):
 
     # extract circuitId only from the Circuit dictionary 
     df['circuitId'] = df['Circuit'].map(lambda x: json.loads(x.replace('\'', "\""))['circuitId'] if isinstance(x, str) else x['circuitId'])
@@ -323,12 +364,12 @@ def clean_season_table(df):
 
     return df
 
-def clean_race_results_table(df):
+
+def clean_race_results_table(df: pd.DataFrame):
   
     df = df[['season', 'round', 'url', 'raceName', 'Circuit', 'date', 'Results', 'time']]
 
     # extract circuitId
-
     # df['circuitId'] = df['Circuit'].map(lambda x: json.loads(x.replace('\'', "\""))['circuitId'] )
     df['circuitId'] = df['Circuit'].map(lambda x: x.replace('\'', "\"")['circuitId'] if isinstance(x, str) else x['circuitId'])
     df = df.drop(['Circuit'], axis='columns')
@@ -371,7 +412,8 @@ def clean_race_results_table(df):
 
     return df
 
-def clean_qualification_results_table(df):
+
+def clean_qualification_results_table(df: pd.DataFrame):
 
     df = df[['season', 'round', 'url', 'raceName', 'Circuit', 'date', 'QualifyingResults', 'time']]
     df['circuitId'] = df['Circuit'].map(lambda x: x['circuitId'] if isinstance(x, dict) else json.loads(str(x).replace('\'', '\"'))['circuitId'])
@@ -450,18 +492,6 @@ def jprint(obj):
 # jprint(circuits.json())
 # jprint(circuits.json()['MRData']['total'])
 
-def write_data_to_db(engine, df, table_name):
-    try:
-        with engine.connect() as conn:
-            # query = 'INSERT into switch values (?, ?, ?, ?)'
-            df.to_sql(table_name, conn, if_exists='append', index=False, schema='formula1')
-
-    except Exception as e:
-        print(f"Database write failed due to {e}")
-
-    finally: 
-        conn.close()
-
 
 def load_dimension_tables():
     # get circuits
@@ -483,9 +513,9 @@ def load_dimension_tables():
         write_data_to_db(engine=db_engine, df=clean_f1_circuits_df, table_name='circuits')
         write_data_to_db(engine=db_engine, df=clean_f1_teams_df, table_name='constructors')
         write_data_to_db(engine=db_engine, df=clean_f1_drivers_df, table_name='drivers')
+        update_etl_table(True, False, False)
     else:
         print("unable to connect to database")
-
 
 
 def initial_historical_data_load():
@@ -531,8 +561,11 @@ def initial_historical_data_load():
 
     if db_engine:
         write_data_to_db(engine=db_engine, df=cleaned_historical_f1_schedule_df, table_name='seasons')
+        update_etl_table(True, True, True) # seasons is kind of a dimensional and fact table (not fully denormalised)
+
         write_data_to_db(engine=db_engine, df=cleaned_historical_f1_quali_results, table_name='qualification_results')
         write_data_to_db(engine=db_engine, df=cleaned_historical_f1_race_results, table_name='race_results')
+        update_etl_table(False, True, True)
     else:
         print("unable to connect to database")
 
@@ -586,9 +619,40 @@ def main():
 
     # check database, if initial data has been loaded fetch only data on current season
     # do this by checking the data_load table
-    # load_dimension_tables()
-    initial_historical_data_load()
-    # initial_historical_data_load_2()
-    # pass
+    # dim_tables_sql = "select tablename from pg_catalog.pg_tables where schemaname='formula1'"
+
+    # check if dimension tables exist from the pg_catalog
+    schema_tables_sql = "select tablename from pg_catalog.pg_tables where schemaname='formula1'"
+    schema_tables = pd.read_sql(sql=schema_tables_sql,con=db_engine)
+
+    if 'data_load' not in schema_tables['tablename'].unique():
+        print("="*50, "\nNo data Loaded, Starting Initial Load")
+        # load all data
+        print("\n", "="*50, "\nLoading dimension tables")
+        load_dimension_tables()
+        print("\n", "="*50, "\nLoading historical results")
+        initial_historical_data_load()
+
+        print("all tables loaded")
+    else:
+        if not set(['seasons', 'circuits', 'constructors', 'drivers']).issubset(set(schema_tables['tablename'].unique())):
+            print("="*50, "\nLoading Dimension tables")
+            load_dimension_tables()
+            print("all dimension tables loaded")
+
+        init_load_sql = "select is_initial_data_load from formula1.data_load where is_initial_data_load = 'true' order by id limit 1"
+        is_initial_data_load = pd.read_sql(sql=init_load_sql,con=db_engine)
+
+        if len(is_initial_data_load['is_initial_data_load']) < 1:
+            print("="*50, "\nLoading historical results")
+            initial_historical_data_load()
+            print("all result tables loaded")
+
+
+    print("all historical tables already loaded")
+
+    # logic for current season
+
+
 
 main()
