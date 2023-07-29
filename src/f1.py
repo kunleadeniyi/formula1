@@ -5,10 +5,13 @@ import datetime
 import re
 import logging
 
+from db import get_db_connection
 
 current_year = datetime.date.today().year
 
 base_url = "http://ergast.com/api/f1"
+
+db_engine =  get_db_connection()
 
 
 # # seasons = requests.get(
@@ -26,13 +29,22 @@ base_url = "http://ergast.com/api/f1"
 
 # helper functions
 def convert_to_dict(x):
-    return json.loads(x.replace('\'', '\"')) if pd.notna(x) else x
+    if pd.notna(x) and isinstance(x, str):
+        out = json.loads(x.replace('\'', '\"'))
+    elif pd.notna(x) and isinstance(x, dict):
+        out = x
+    else:
+        out = x
+    return out
 
 def convert_to_list(x):
-    if pd.notna(x):
+    if pd.notna(x).all() and isinstance(x, str):
         string = x.replace('\'','\"')
         corrected_text = re.sub(r'(?<=[a-zA-Z])\"(?=[a-zA-Z])', '\'', string) # to fix names like O"Brien after replace ' with "
         out = json.loads(corrected_text) 
+    elif pd.notna(x).all() and isinstance(x, list):
+        corrected_text = re.sub(r'(?<=[a-zA-Z])\"(?=[a-zA-Z])', '\'', str(x)) # to fix names like O"Brien after replace ' with "
+        out = x
     else:
         out = x
     return out
@@ -252,9 +264,11 @@ def historical_schedule():
 def clean_circuit_table(df: pd.DataFrame):
     # explode the location column the circuits df
     df["Location"] = df["Location"].apply(lambda x: json.loads(x.replace('\'', '\"')) if isinstance(x, str) else x)
-    dfLocation  = pd.json_normalize(df['Location'])
+    # df["Location"] = df["Location"].apply(convert_to_dict)
 
-    df = pd.concat([df.reset_index(drop=True), dfLocation.reset_index(drop=True)], axis='columns')
+    df_location  = pd.json_normalize(df['Location'])
+
+    df = pd.concat([df.reset_index(drop=True), df_location.reset_index(drop=True)], axis='columns')
     df = df.drop('Location', axis='columns')
 
     # convert data types
@@ -271,7 +285,9 @@ def clean_driver_table(df: pd.DataFrame):
 def clean_season_table(df):
 
     # extract circuitId only from the Circuit dictionary 
-    df['circuitId'] = df['Circuit'].map(lambda x: json.loads(x.replace('\'', "\""))['circuitId'] )
+    df['circuitId'] = df['Circuit'].map(lambda x: json.loads(x.replace('\'', "\""))['circuitId'] if isinstance(x, str) else x['circuitId'])
+    # df['circuitId'] = df['Circuit'].map(convert_to_dict)
+
     df = df.drop(['Circuit'], axis='columns')
 
     # checking First, second and third and qualifying, time
@@ -300,7 +316,8 @@ def clean_season_table(df):
 
     for col in date_cols:
         if 'date' in col:
-            df[col] = pd.to_datetime(df[col], infer_datetime_format=True)
+            # df[col] = pd.to_datetime(df[col], infer_datetime_format=True)
+            df[col] = pd.to_datetime(df[col], format="%Y-%m-%d")
         else:
             df[col] = pd.to_datetime(df[col], format="%H:%M:%SZ").dt.time
 
@@ -312,7 +329,8 @@ def clean_race_results_table(df):
 
     # extract circuitId
 
-    df['circuitId'] = df['Circuit'].map(lambda x: json.loads(x.replace('\'', "\""))['circuitId'] )
+    # df['circuitId'] = df['Circuit'].map(lambda x: json.loads(x.replace('\'', "\""))['circuitId'] )
+    df['circuitId'] = df['Circuit'].map(lambda x: x.replace('\'', "\"")['circuitId'] if isinstance(x, str) else x['circuitId'])
     df = df.drop(['Circuit'], axis='columns')
 
     df['Results'] = df['Results'].map(convert_to_list)
@@ -338,12 +356,11 @@ def clean_race_results_table(df):
     # points, FastestLap_AverageSpeed_speed - float
     # FastestLap_Time_time - time but in minutes
 
-    df['date'] = pd.to_datetime(df['date'], infer_datetime_format=True)
+    df['date'] = pd.to_datetime(df['date'], format="%Y-%m-%d")
     int_columns =  ['number', 'position', 'grid', 'laps', 'FastestLap_rank', 'FastestLap_lap', 'Time_millis']
 
     # df[int_columns] = pd.to_numeric(df[int_columns], errors='coerce').astype('Int64') # didnt work, only take series, list
     for c in int_columns:
-        print(c)
         # to_numeric convert to float and empty strings to np.nan
         # Int64 allows nullable integers (np.nan) while int64 doesn't
         df[c] = pd.to_numeric(df[c], errors='coerce').astype('Int64')
@@ -357,7 +374,8 @@ def clean_race_results_table(df):
 def clean_qualification_results_table(df):
 
     df = df[['season', 'round', 'url', 'raceName', 'Circuit', 'date', 'QualifyingResults', 'time']]
-    df['circuitId'] = df['Circuit'].map(lambda x: json.loads(x.replace('\'', '\"'))['circuitId'])
+    df['circuitId'] = df['Circuit'].map(lambda x: x['circuitId'] if isinstance(x, dict) else json.loads(str(x).replace('\'', '\"'))['circuitId'])
+
     df = df.drop(['Circuit'], axis='columns')
 
     # convert_to_list(df['QualifyingResults'][0])
@@ -376,7 +394,7 @@ def clean_qualification_results_table(df):
     df = df.drop(['QualifyingResults'], axis='columns')
 
     # data types
-    df['date'] = pd.to_datetime(df['date'], infer_datetime_format=True)
+    df['date'] = pd.to_datetime(df['date'], format="%Y-%m-%d")
     df['time'] = pd.to_datetime(df['time'], format="%H:%M:%SZ").dt.time
 
     df['number'] = pd.to_numeric(df['number'], errors='coerce').astype('Int64')
@@ -432,11 +450,24 @@ def jprint(obj):
 # jprint(circuits.json())
 # jprint(circuits.json()['MRData']['total'])
 
+def write_data_to_db(engine, df, table_name):
+    try:
+        with engine.connect() as conn:
+            # query = 'INSERT into switch values (?, ?, ?, ?)'
+            df.to_sql(table_name, conn, if_exists='append', index=False, schema='formula1')
+
+    except Exception as e:
+        print(f"Database write failed due to {e}")
+
+    finally: 
+        conn.close()
+
+
 def load_dimension_tables():
     # get circuits
     api_count, actual_count, f1_circuits = get_dimension('Circuit')
     f1_circuits_df = create_dataframe(f1_circuits)
-    clean_f1_circuits_df = clean_circuit_table(f1_drivers_df)
+    clean_f1_circuits_df = clean_circuit_table(f1_circuits_df)
 
     # get constructors
     api_team_count, actual_team_count, f1_teams = get_dimension('Constructor')
@@ -448,7 +479,14 @@ def load_dimension_tables():
     f1_drivers_df = create_dataframe(f1_drivers)
     clean_f1_drivers_df = clean_driver_table(f1_drivers_df)
 
-    pass
+    if db_engine:
+        write_data_to_db(engine=db_engine, df=clean_f1_circuits_df, table_name='circuits')
+        write_data_to_db(engine=db_engine, df=clean_f1_teams_df, table_name='constructors')
+        write_data_to_db(engine=db_engine, df=clean_f1_drivers_df, table_name='drivers')
+    else:
+        print("unable to connect to database")
+
+
 
 def initial_historical_data_load():
 
@@ -459,8 +497,12 @@ def initial_historical_data_load():
     years = df_seasons['season'].to_list()
     years = [eval(year) for year in years]
     # print(years)
+    # years = [2022]
 
     historical_f1_schedule_df = pd.DataFrame()
+    historical_f1_race_results = pd.DataFrame()
+    historical_f1_quali_results = pd.DataFrame()
+
     for year in years:
     # for year in range(2000,2022):
         if year != current_year:
@@ -468,19 +510,9 @@ def initial_historical_data_load():
             df = create_dataframe(temp_season_df)
             historical_f1_schedule_df = pd.concat([historical_f1_schedule_df, df])
     
-    # clean historical table (df_schedule)
-
-    historical_f1_race_results = pd.DataFrame()
-    historical_f1_quali_results = pd.DataFrame()
-    for year in years:
-    # for year in range(2000,2022):
-        if year != current_year:
-            # get all rounds from the historical df
-            # print(historical_f1_schedule_df.dtypes)
             rounds = historical_f1_schedule_df[historical_f1_schedule_df['season'].astype(int) == year]['round'].to_list()
             rounds = [eval(round) for round in rounds]
 
-            
             for round in rounds:
                 # print(f"round: {round}")
                 temp_result_df = get_race_result(year, round)
@@ -492,15 +524,71 @@ def initial_historical_data_load():
                     quali_df = create_dataframe(temp_quali_result_df)
                     historical_f1_quali_results = pd.concat([historical_f1_quali_results, quali_df])
 
+    # clean all dfs
+    cleaned_historical_f1_schedule_df = clean_season_table(historical_f1_schedule_df)
+    cleaned_historical_f1_quali_results = clean_qualification_results_table(historical_f1_quali_results)
+    cleaned_historical_f1_race_results = clean_race_results_table(historical_f1_race_results)
+
+    if db_engine:
+        write_data_to_db(engine=db_engine, df=cleaned_historical_f1_schedule_df, table_name='seasons')
+        write_data_to_db(engine=db_engine, df=cleaned_historical_f1_quali_results, table_name='qualification_results')
+        write_data_to_db(engine=db_engine, df=cleaned_historical_f1_race_results, table_name='race_results')
+    else:
+        print("unable to connect to database")
 
 
     # historical_f1_race_results.to_csv("historical_f1_race_results.csv")
-    historical_f1_quali_results.to_csv("historical_f1_quali_results.csv")
+    # historical_f1_quali_results.to_csv("historical_f1_quali_results.csv")
 
-initial_historical_data_load() # create a table called data_load with columns date, initial_load: bool, etl_load_time
+
+
+
+"""
+def initial_historical_data_load():
+
+    # get seasons and historical schedule
+    season_count, actual_season_count, f1_seasons = get_dimension('Season')
+    df_seasons = create_dataframe(f1_seasons)
+
+    years = df_seasons['season'].to_list()
+    years = [eval(year) for year in years]
+
+    # clean all dfs
+    print(df_seasons.head())
+    # cleaned_df_seasons = clean_season_table(df_seasons)    
+
+def initial_historical_data_load_2():
+
+    # get seasons and historical schedule
+    f1_seasons = pd.read_csv("data/f1_schedule.csv")
+    df_seasons = create_dataframe(f1_seasons)
+
+    historical_f1_race_results = pd.read_csv("data/historical_f1_race_results.csv")
+    historical_f1_quali_results = pd.read_csv("data/historical_f1_quali_results.csv")
+
+
+    # clean all dfs
+    cleaned_df_seasons = clean_season_table(df_seasons)
+    cleaned_historical_f1_quali_results = clean_qualification_results_table(historical_f1_quali_results)
+    cleaned_historical_f1_race_results = clean_race_results_table(historical_f1_race_results)
+
+    if db_engine:
+        write_data_to_db(engine=db_engine, df=cleaned_df_seasons, table_name='seasons')
+        write_data_to_db(engine=db_engine, df=cleaned_historical_f1_quali_results, table_name='qualification_results')
+        write_data_to_db(engine=db_engine, df=cleaned_historical_f1_race_results, table_name='race_results')
+    else:
+        print("unable to connect to database")
+"""
+
+# initial_historical_data_load() # create a table called data_load with columns date, initial_load: bool, etl_load_time
 
 def main():
 
     # check database, if initial data has been loaded fetch only data on current season
     # do this by checking the data_load table
-    pass
+    # load_dimension_tables()
+    initial_historical_data_load()
+    # initial_historical_data_load_2()
+    # pass
+
+main()

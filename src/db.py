@@ -3,6 +3,7 @@ import json
 
 
 import psycopg2
+import sqlalchemy as sa
 import sys
 import boto3
 import os
@@ -21,19 +22,24 @@ PASSWORD=os.getenv('DB_PASSWORD')
 
 #gets the credentials from .aws/credentials
 session = boto3.Session(profile_name='default')
-client = session.client('rds')
-
+# client = session.client('rds')
 # token = client.generate_db_auth_token(DBHostname=ENDPOINT, Port=PORT, DBUsername=USER, Region=REGION)
 
-try:
-    conn = psycopg2.connect(host=ENDPOINT, port=PORT, database=DBNAME, user=USER, password=PASSWORD, sslrootcert="SSLCERTIFICATE")
-    cur = conn.cursor()
-    cur.execute("""SELECT now()""")
-    query_results = cur.fetchall()
-    print(query_results)
-except Exception as e:
-    print("Database connection failed due to {}".format(e))                
-                
+       
+            
+def get_db_connection():
+    # conn = psycopg2.connect(host=ENDPOINT, port=PORT, database=DBNAME, user=USER, password=PASSWORD, sslrootcert="SSLCERTIFICATE")
+    conn = sa.create_engine(f'postgresql+psycopg2://{USER}:{PASSWORD}@{ENDPOINT}:{PORT}/{DBNAME}')
+    return conn
 
 
+if __name__ == "__main__":
+    try:
+        conn = psycopg2.connect(host=ENDPOINT, port=PORT, database=DBNAME, user=USER, password=PASSWORD, sslrootcert="SSLCERTIFICATE")
+        cur = conn.cursor()
+        cur.execute("""SELECT now()""")
+        query_results = cur.fetchall()
+        print(query_results)
+    except Exception as e:
+        print("Database connection failed due to {}".format(e))         
 
