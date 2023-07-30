@@ -1,7 +1,5 @@
 import requests
 import json
-
-
 import psycopg2
 import sqlalchemy as sa
 import sys
@@ -18,14 +16,10 @@ REGION=os.getenv('DB_REGION')
 DBNAME=os.getenv('DB_NAME')
 PASSWORD=os.getenv('DB_PASSWORD')
 
-# print(ENDPOINT, PORT, USER, REGION, DBNAME)
-
 #gets the credentials from .aws/credentials
 session = boto3.Session(profile_name='default')
 # client = session.client('rds')
-# token = client.generate_db_auth_token(DBHostname=ENDPOINT, Port=PORT, DBUsername=USER, Region=REGION)
-
-       
+# token = client.generate_db_auth_token(DBHostname=ENDPOINT, Port=PORT, DBUsername=USER, Region=REGION)    
             
 def get_db_connection():
     # conn = psycopg2.connect(host=ENDPOINT, port=PORT, database=DBNAME, user=USER, password=PASSWORD, sslrootcert="SSLCERTIFICATE")
