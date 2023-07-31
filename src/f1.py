@@ -369,7 +369,9 @@ def clean_season_table(df: pd.DataFrame):
             # df[col] = pd.to_datetime(df[col], infer_datetime_format=True)
             df[col] = pd.to_datetime(df[col], format="%Y-%m-%d")
         else:
+            # df[col] = pd.to_datetime(df[col], format="%H:%M:%SZ").dt.time
             df[col] = pd.to_datetime(df[col], format="%H:%M:%SZ").dt.time
+            df[col].replace({np.nan: None}, inplace = True)
 
     df['season'] = pd.to_numeric(df['season'], errors='coerce').astype('Int64')
     df['round'] = pd.to_numeric(df['round'], errors='coerce').astype('Int64')
@@ -562,18 +564,21 @@ def update_database(db_table_name, changed_rows, original, engine): # can be use
                 stmt = table.update().where(table.c.season == row['season'], table.c.round == row['round'])
                 for col in changed_rows.columns:
                     # if col in ['season', 'round']:
-                    if str(row[col]) in ['NaT', 'NaN']:
+                    if str(row[col]) in ['NaT', 'NaN', 'None']:
                         # stmt = stmt.values({col: None})
                         continue
-
+                    # print(col)
+                    # print(row[col])
+                    # print(original.loc[
+                    #         (original['season']==row['season']) & (original['round']==row['round']),
+                    #         col].iloc[0])
+                    
                     orig = original.loc[
-                            (original['season']==row['season']) & (original['round']==row['round']),
-                            col
+                            (original['season']==row['season']) & (original['round']==row['round']),col
                         ].iloc[0]
                     if ('time' in col) and (str(row[col]) == str(orig)):
-                        # print(col)
-                        # stmt = stmt.values({col: row[col]})
                         continue
+                    
                     if ('time' in col) and (str(row[col]) != str(orig)):
                         stmt = stmt.values({col: row[col]})
                     
@@ -583,8 +588,8 @@ def update_database(db_table_name, changed_rows, original, engine): # can be use
                 # print(f"PARAMS: {stmt._values}")
                 if stmt._values != None:
                     conn.execute(stmt)
-                    # print(stmt)
                     print(f"season: {row['season']}, round: {row['round']} table: {db_table_name} columns: {stmt._values.keys()} modified")
+            
             conn.commit() 
         conn.close()
 
@@ -602,11 +607,23 @@ def load_current_year_schedule():
     cleaned_api_schedule_df = clean_season_table(api_schedule_df)
 
     # upsert schedule
-    season_sql = f"select * from formula1.s where season = {year}"
+    season_sql = f"select * from formula1.seasons where season = {year}"
     db_season_schedule = pd.read_sql(season_sql, db_engine)
+    # print(db_season_schedule)
 
     merged = cleaned_api_schedule_df.merge(db_season_schedule, on=list(db_season_schedule.columns), how='outer', indicator=True)
+    # print(merged)
+    # print(merged.dtypes)
     changed = merged[merged['_merge'] == 'left_only'].drop('_merge', axis='columns')
+    # left_only includes missing rows that are in the right table 
+    # exclude those rows
+    exclude = changed[
+        ~np.isin(changed[['season', 'round']], merged[merged['_merge'] == 'right_only'][['season', 'round']])
+    ]
+    changed = changed.drop(exclude.index, axis='index')
+    
+    # print(changed)
+    # print(changed.dtypes)
     
     missing_rows = cleaned_api_schedule_df[
         ~np.isin(
@@ -614,18 +631,14 @@ def load_current_year_schedule():
             db_season_schedule[['season', 'round']]
         )
     ]
-    # print(missing_rows.shape)
-    # print(missing_rows.head())
 
     if db_engine:
-        # Assuming changed_rows has been determined as shown in the previous example
-        # print(changed)
-        update_database('seasons', changed, db_season_schedule, db_engine)
-        # pass
-        # print(missing_rows)
+        # Assuming changed_rows has been determined
+        if db_season_schedule.shape[0] > 0:
+            update_database('seasons', changed, db_season_schedule, db_engine)
+
         write_data_to_db(engine=db_engine, df=missing_rows, table_name='seasons' )
 
-    # 
 
 def load_current_year_results():
     pass
