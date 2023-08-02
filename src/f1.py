@@ -267,6 +267,28 @@ def get_race_result(season: int, round: int):
 
     return f1_races_results
 
+def get_sprint_result(season: int, round: int):
+    endpoint = f"{base_url}/{str(season)}/{str(round)}/sprint.json"
+    print(endpoint)
+    try:
+        sprint_response = requests.get(url=endpoint)
+        # print(race_response.status_code)
+
+        sprint_response.raise_for_status()
+
+        # print(race_response.json()["MRData"])
+
+        f1_sprint_results = sprint_response.json()["MRData"]["RaceTable"]["Races"]
+    
+    except requests.Timeout:
+        print("API call timedout")
+    except requests.RequestException as re:
+        print(f"Error calling circuits api: {re}")
+    except Exception as e:
+        print(e)
+
+    return f1_sprint_results
+
 
 def get_qualifying_result(season: int, round: int):
     endpoint = f"{base_url}/{str(season)}/{str(round)}/qualifying.json"
@@ -429,6 +451,56 @@ def clean_race_results_table(df: pd.DataFrame):
 
     return df
 
+
+def clean_sprint_results_table(df: pd.DataFrame):
+  
+    df = df[['season', 'round', 'url', 'raceName', 'Circuit', 'date', 'SprintResults', 'time']]
+
+    # extract circuitId
+    # df['circuitId'] = df['Circuit'].map(lambda x: json.loads(x.replace('\'', "\""))['circuitId'] )
+    df['circuitId'] = df['Circuit'].map(lambda x: x.replace('\'', "\"")['circuitId'] if isinstance(x, str) else x['circuitId'])
+    df = df.drop(['Circuit'], axis='columns')
+
+    df['SprintResults'] = df['SprintResults'].map(convert_to_list)
+    
+    # vertically explode results for each round
+    df = df.explode('SprintResults')
+    df = df.reset_index(drop=True)
+
+    results_explode = pd.json_normalize(df['SprintResults'], sep='_')
+
+    # drop driver details other than driverId 
+    # drop constructor details other than constructorId
+    new_columns = [column for column in results_explode.columns if not column.startswith(('Driver', 'Constructor')) or column.endswith('Id')]
+  
+    results_explode = results_explode[new_columns]
+
+    df = pd.concat([df.reset_index(drop=True), results_explode.reset_index(drop=True)], axis='columns')
+    df = df.drop(['SprintResults'], axis='columns')
+
+    # convert column to correct data types
+    # date - date format, clean up time column
+    # number, position, points, grid, laps, FastestLap_rank, FastestLap_lap - integer
+    # points, FastestLap_AverageSpeed_speed - float
+    # FastestLap_Time_time - time but in minutes
+
+    df['date'] = pd.to_datetime(df['date'], format="%Y-%m-%d")
+    int_columns =  ['number', 'position', 'grid', 'laps', 'FastestLap_lap', 'Time_millis']
+
+    # df[int_columns] = pd.to_numeric(df[int_columns], errors='coerce').astype('Int64') # didnt work, only take series, list
+    for c in int_columns:
+        # to_numeric convert to float and empty strings to np.nan
+        # Int64 allows nullable integers (np.nan) while int64 doesn't
+        df[c] = pd.to_numeric(df[c], errors='coerce').astype('Int64')
+
+    # df['FastestLap_AverageSpeed_speed'] = df['FastestLap_AverageSpeed_speed'].astype('float')
+    df['points'] = df['points'].astype('float')
+    df['time'] = pd.to_datetime(df['time'], format="%H:%M:%SZ").dt.time
+
+    df['season'] = pd.to_numeric(df['season'], errors='coerce').astype('Int64')
+    df['round'] = pd.to_numeric(df['round'], errors='coerce').astype('Int64')
+
+    return df
 
 def clean_qualification_results_table(df: pd.DataFrame):
 
@@ -654,22 +726,27 @@ def load_current_year_results(year: int=current_year):
     if currrent_year_results.shape[0] < 1:
 
         f1_race_results = pd.DataFrame()
-        f1_quali_results = pd.DataFrame()    
+        f1_quali_results = pd.DataFrame() 
+        f1_sprint_results = pd.DataFrame()   
         # initial load
         for round in sorted(schedule['round']):
 
             if (schedule[schedule['round'] == round]['date'].iloc[0]) < datetime.datetime.now():
-                results = get_race_result(year, round)
+                race_results = get_race_result(year, round)
+                sprint_results = get_sprint_result(year, round)
                 quali_results = get_qualifying_result(year, round)
 
-                df_results = create_dataframe(results)
+                df_results = create_dataframe(race_results)
+                df_sprint = create_dataframe(sprint_results)
                 df_quali = create_dataframe(quali_results)
 
                 f1_race_results = pd.concat([f1_race_results, df_results])
+                f1_sprint_results = pd.concat([f1_sprint_results, df_sprint])
                 f1_quali_results = pd.concat([f1_quali_results, df_quali])
 
         # clean 
         clean_race_results = clean_race_results_table(f1_race_results)
+        clean_sprint_results = clean_sprint_results_table(f1_sprint_results)
         clean_quali_results = clean_qualification_results_table(f1_quali_results)
 
     else:
@@ -681,30 +758,38 @@ def load_current_year_results(year: int=current_year):
             clean_race_results = pd.DataFrame() # for the conditon "if (clean_race_results.shape[0] > 0)" at the end
         else: 
             f1_race_results = pd.DataFrame()
-            f1_quali_results = pd.DataFrame()    
+            f1_quali_results = pd.DataFrame()
+            f1_sprint_results = pd.DataFrame()     
             
             print(upper_bound, lower_bound)
             # load new results
             for round in range(lower_bound, upper_bound):
                 
                 if (schedule[schedule['round'] == round]['date'].iloc[0]) < datetime.datetime.now():
-                    results = get_race_result(year, round)
+                    race_results = get_race_result(year, round)
+                    sprint_results = get_sprint_result(year, round)
                     quali_results = get_qualifying_result(year, round)
 
-                    df_results = create_dataframe(results)
+                    df_results = create_dataframe(race_results)
+                    df_sprint = create_dataframe(sprint_results)
                     df_quali = create_dataframe(quali_results)
 
                     f1_race_results = pd.concat([f1_race_results, df_results])
+                    f1_sprint_results = pd.concat([f1_sprint_results, df_sprint])
                     f1_quali_results = pd.concat([f1_quali_results, df_quali])
 
             # clean dataframes
             clean_race_results = clean_race_results_table(f1_race_results)
+            clean_sprint_results = clean_sprint_results_table(f1_sprint_results)
             clean_quali_results = clean_qualification_results_table(f1_quali_results)
-
+    
+    # print(clean_sprint_results.head())
     if db_engine:
         if (clean_race_results.shape[0] > 0):
             write_data_to_db(db_engine, clean_race_results, 'race_results')
+            write_data_to_db(db_engine, clean_sprint_results, 'sprint_results')
             write_data_to_db(db_engine, clean_quali_results, 'qualification_results')
+
         else:
             print("no new results")
     else: 
