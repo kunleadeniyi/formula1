@@ -1,0 +1,28 @@
+version: 2
+
+sources:
+  - name: formula1
+    description: formula1 dataset loaded in a postgres database
+    schema: formula1
+    database: formula1
+    tables:
+      - name: circuits
+        description: all the circuits for formula 1 Grand Prix races
+
+      - name: constructors
+        description: table containing all formula 1 teams
+
+      - name: drivers
+        description: Formula 1 drivers
+
+      - name: seasons
+        description: All formula 1 seasons
+
+      - name: qualification_results
+        description: Results of qualification (q1, q2, q3 and sprint qualification)
+
+      - name: sprint_results
+        description: Results of sprint races
+
+      - name: race_results
+        description: Actual race results
