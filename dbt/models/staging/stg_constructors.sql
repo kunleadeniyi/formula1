@@ -6,4 +6,4 @@ with teams as (
         nationality
     from {{ source('formula1', 'constructors') }}
 )
-selct * from teams
+select * from teams

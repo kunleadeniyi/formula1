@@ -22,6 +22,6 @@ with sprint_results as
     "FastestLap_lap" as fastest_lap,
     "FastestLap_Time_time" as fastest_lap_time
 FROM
-    formula1.sprint_results
+    {{ source('formula1', 'sprint_results') }}
 )
 select * from sprint_results

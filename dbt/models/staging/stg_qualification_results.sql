@@ -9,12 +9,12 @@ with quali as (
         "circuitId" as circuit_id,
         number,
         position,
-        Q1,
+        "Q1" as q1,
         "Driver_driverId" as driver_id,
         "Constructor_constructorId" as constructor_id,
-        Q2,
-        Q3
+        "Q2" as q2,
+        "Q3" as q3
     FROM
-        formula1.qualifying_results
+        {{ source('formula1', 'qualification_results') }}
 )
 select * from quali 

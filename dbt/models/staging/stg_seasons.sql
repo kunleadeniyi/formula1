@@ -20,4 +20,4 @@ with seasons as (
     FROM
         {{ source('formula1', 'seasons') }}
 )
-select * from season
+select * from seasons

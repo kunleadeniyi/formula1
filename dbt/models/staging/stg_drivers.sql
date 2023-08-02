@@ -12,4 +12,4 @@ with drivers as (
         {{ source('formula1', 'drivers') }}
         
 )
-selct * from drivers
+select * from drivers

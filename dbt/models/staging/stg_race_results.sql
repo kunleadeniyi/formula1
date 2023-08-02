@@ -25,6 +25,7 @@ with race_results as
     "FastestLap_AverageSpeed_units" as fastest_lap_time_speed_unit,
     "FastestLap_AverageSpeed_speed" as fastest_lap_time_avg_speed
 FROM
-    formula1.race_results
+    --formula1.race_results
+    {{ source('formula1', 'race_results') }}
 )
 select * from race_results
