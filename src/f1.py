@@ -593,12 +593,12 @@ def update_database(db_table_name, changed_rows, original, engine): # can be use
             conn.commit() 
         conn.close()
 
-def load_current_year_schedule():
+def load_current_year_schedule(year: int = current_year):
     
-    year = current_year
-    f1_schedule_df = pd.DataFrame()
-    f1_race_results = pd.DataFrame()
-    f1_quali_results = pd.DataFrame()
+    # year = current_year
+    # f1_schedule_df = pd.DataFrame()
+    # f1_race_results = pd.DataFrame()
+    # f1_quali_results = pd.DataFrame()
 
     #  logic
     #  all ways refresh the season schedule because of postponed races etc
@@ -638,67 +638,81 @@ def load_current_year_schedule():
             update_database('seasons', changed, db_season_schedule, db_engine)
 
         write_data_to_db(engine=db_engine, df=missing_rows, table_name='seasons' )
+    else:
+        print("db engine not available while on load_current_year_schedule function call")
 
 
-def load_current_year_results():
-    pass
-#     # new_schedule = cleaned_f1_schedule_df[
-#     #     # ~np.isin()
-#     # ]
+def load_current_year_results(year: int=current_year):
 
-# # >>> df1.set_index('Code', inplace=True)
-# # >>> df1.update(df2.set_index('Code'))
-# # >>> df1.reset_index()
+    season_rounds_sql = f"select * from formula1.seasons where season = {year}"
+    schedule = pd.read_sql(season_rounds_sql, db_engine)
 
-#     #  get max race result round, check if new race result is available else ignore data load
-#     #  do the same for quali
+    # print(([r for r in sorted(rounds['round'])]))
+    current_year_results_sql = f"select season, round from formula1.race_results where season = {year}"
+    currrent_year_results = pd.read_sql(current_year_results_sql, db_engine)
 
-#     temp_rounds = f1_schedule_df[f1_schedule_df['season'].astype(int) == year]['round'].to_list()
-#     temp_rounds = [eval(round) for round in temp_rounds]
+    if currrent_year_results.shape[0] < 1:
 
-#     # get inserted rounds
-#     season_rounds_sql = f"select * from formula1.seasons where season = {year}"
-#     # new_rounds = 
+        f1_race_results = pd.DataFrame()
+        f1_quali_results = pd.DataFrame()    
+        # initial load
+        for round in sorted(schedule['round']):
 
-#     for round in temp_rounds:
-#         # print(f"round: {round}")
-#         temp_result_df = get_race_result(year, round)
-#         df = create_dataframe(temp_result_df)
-#         f1_race_results = pd.concat([f1_race_results, df])
-        
-#         temp_quali_result_df = get_qualifying_result(year, round)
-#         quali_df = create_dataframe(temp_quali_result_df)
-#         f1_quali_results = pd.concat([f1_quali_results, quali_df])
+            if (schedule[schedule['round'] == round]['date'].iloc[0]) < datetime.datetime.now():
+                results = get_race_result(year, round)
+                quali_results = get_qualifying_result(year, round)
 
-#     # clean all dfs
-#     cleaned_f1_schedule_df = clean_season_table(f1_schedule_df)
+                df_results = create_dataframe(results)
+                df_quali = create_dataframe(quali_results)
 
-#     cleaned_f1_schedule_df.to_csv('f1_2023.csv')
-#     cleaned_f1_quali_results = clean_qualification_results_table(f1_quali_results)
-#     cleaned_f1_race_results = clean_race_results_table(f1_race_results)
+                f1_race_results = pd.concat([f1_race_results, df_results])
+                f1_quali_results = pd.concat([f1_quali_results, df_quali])
 
-#     if db_engine:
-#         # check if season is there
-#         season_sql = f"select season from formula1.seasons where season = {year} limit 1"
-        
+        # clean 
+        clean_race_results = clean_race_results_table(f1_race_results)
+        clean_quali_results = clean_qualification_results_table(f1_quali_results)
 
-#         # write_data_to_db(engine=db_engine, df=cleaned_f1_schedule_df, table_name='seasons')
-#         # update_etl_table(True, True, True) # seasons is kind of a dimensional and fact table (not fully denormalised)
+    else:
+        latest_round = currrent_year_results['round'].iloc[-1]
+        lower_bound = latest_round + 1
+        upper_bound = schedule[schedule['date'] < datetime.datetime.now()]['round'].max() + 1
 
-#         # write_data_to_db(engine=db_engine, df=cleaned_f1_quali_results, table_name='qualification_results')
-#         # write_data_to_db(engine=db_engine, df=cleaned_f1_race_results, table_name='race_results')
-#         # update_etl_table(False, True, True)
+        if lower_bound >= upper_bound:
+            clean_race_results = pd.DataFrame() # for the conditon "if (clean_race_results.shape[0] > 0)" at the end
+        else: 
+            f1_race_results = pd.DataFrame()
+            f1_quali_results = pd.DataFrame()    
+            
+            print(upper_bound, lower_bound)
+            # load new results
+            for round in range(lower_bound, upper_bound):
+                
+                if (schedule[schedule['round'] == round]['date'].iloc[0]) < datetime.datetime.now():
+                    results = get_race_result(year, round)
+                    quali_results = get_qualifying_result(year, round)
 
+                    df_results = create_dataframe(results)
+                    df_quali = create_dataframe(quali_results)
 
-#         # upsert
-#         pass
-#     else:
-#         print("unable to connect to database")
+                    f1_race_results = pd.concat([f1_race_results, df_results])
+                    f1_quali_results = pd.concat([f1_quali_results, df_quali])
 
-#     return existing_season_schedule
+            # clean dataframes
+            clean_race_results = clean_race_results_table(f1_race_results)
+            clean_quali_results = clean_qualification_results_table(f1_quali_results)
+
+    if db_engine:
+        if (clean_race_results.shape[0] > 0):
+            write_data_to_db(db_engine, clean_race_results, 'race_results')
+            write_data_to_db(db_engine, clean_quali_results, 'qualification_results')
+        else:
+            print("no new results")
+    else: 
+        print("db engine not available while on load_current_year_results function call")
+
 
 def main():
-    """
+    # """
     # check database, if initial data has been loaded fetch only data on current season
     # do this by checking the data_load table
     # dim_tables_sql = "select tablename from pg_catalog.pg_tables where schemaname='formula1'"
@@ -732,10 +746,11 @@ def main():
 
 
     print("all historical and dimension tables already loaded")
-    """
+    # """
     # logic for current season
     load_current_year_schedule()
 
+    load_current_year_results()
 
 
 main()
