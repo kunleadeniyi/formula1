@@ -2,19 +2,19 @@
 version: 2
 
 models:
-    - name: my_first_dbt_model
-      description: "A starter dbt model"
+    - name: stg_circuits
+      description: "Staging table of formula1 circuits"
       columns:
-          - name: id
+          - name: circuit_id
             description: "The primary key for this table"
             tests:
                 - unique
                 - not_null
 
-    - name: my_second_dbt_model
-      description: "A starter dbt model"
+    - name: stg_constructors
+      description: "Staging table of formula1 teams"
       columns:
-          - name: id
+          - name: constructor_id
             description: "The primary key for this table"
             tests:
                 - unique
