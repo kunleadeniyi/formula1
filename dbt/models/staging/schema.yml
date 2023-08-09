@@ -1,0 +1,21 @@
+
+version: 2
+
+models:
+    - name: stg_circuits
+      description: "Staging table of formula1 circuits"
+      columns:
+          - name: circuit_id
+            description: "The primary key for this table"
+            tests:
+                - unique
+                - not_null
+
+    - name: stg_constructors
+      description: "Staging table of formula1 teams"
+      columns:
+          - name: constructor_id
+            description: "The primary key for this table"
+            tests:
+                - unique
+                - not_null
