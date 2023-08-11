@@ -27,7 +27,7 @@ def get_db_connection():
         conn = sa.create_engine(f'postgresql+psycopg2://{USER}:{PASSWORD}@{ENDPOINT}:{PORT}/{DBNAME}')
     except Exception as e:
         print("Database connection failed due to {}".format(e))
-    return conn
+    return conn or None
 
 
 if __name__ == "__main__":
